@@ -1,8 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:isolate';
 
 main(List<String> args) async {
-  var worker = Worker();
+  var worker = WorkerImp();
   // for (int i = 0; i < 100; i++) {
   //   worker.reuqest('发送消息$i').then((data) {
   //     print('子线程处理后的消息:$data');
@@ -13,7 +14,17 @@ main(List<String> args) async {
   });
 }
 
-class Worker {
+class WorkerImp extends Worker {
+  @override
+  WorkResponse runThread(WorkRequest _request) {
+    print('子线程收到：${_request.message}');
+    print('运行耗时任务');
+    sleep(const Duration(seconds: 5));
+    return WorkResponse.ok(_request.requestId, '处理后的消息:${_request.message}');
+  }
+}
+
+abstract class Worker {
   SendPort? _sendPort;
   Isolate? _isolate;
   final _isolateReady = Completer<void>();
@@ -32,7 +43,7 @@ class Worker {
     final completer = Completer();
     final requestId = Capability();
     _completers[requestId] = completer;
-    _sendPort?.send(_Request(requestId, message));
+    _sendPort?.send(WorkRequest(requestId, message));
     return completer.future;
   }
 
@@ -44,7 +55,7 @@ class Worker {
         _isolateReady.complete();
         return;
       }
-      if (message is _Response) {
+      if (message is WorkResponse) {
         final completer = _completers[message.requestId];
         if (completer != null && message.success) {
           completer.complete(message.message);
@@ -58,15 +69,16 @@ class Worker {
     );
   }
 
-  static void _isolateEntry(dynamic message1) {
+  WorkResponse runThread(WorkRequest _request);
+
+  void _isolateEntry(dynamic message1) {
     SendPort? tmpSendPort;
 
     final tmpReceivePort = ReceivePort();
     tmpReceivePort.listen((dynamic message2) async {
-      if (message2 is _Request) {
-        print('子线程收到：${message2.message}');
-        tmpSendPort?.send(
-            _Response.ok(message2.requestId, '处理后的消息:${message2.message}'));
+      if (message2 is WorkRequest) {
+        WorkResponse _response = await runThread(message2);
+        tmpSendPort?.send(_response);
         return;
       }
     });
@@ -79,20 +91,20 @@ class Worker {
   }
 }
 
-class _Request {
+class WorkRequest {
   final Capability requestId;
 
   final dynamic message;
 
-  const _Request(this.requestId, this.message);
+  const WorkRequest(this.requestId, this.message);
 }
 
-class _Response {
+class WorkResponse {
   final Capability requestId;
 
   final bool success;
 
   final dynamic message;
 
-  const _Response.ok(this.requestId, this.message, {this.success = true});
+  const WorkResponse.ok(this.requestId, this.message, {this.success = true});
 }
