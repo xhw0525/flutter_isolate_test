@@ -25,7 +25,7 @@ class WorkerImp extends Worker {
 }
 
 abstract class Worker {
-  SendPort? _sendPort;
+  SendPort? _p2;
   Isolate? _isolate;
   final _isolateReady = Completer<void>();
   final Map<Capability, Completer> _completers = {};
@@ -43,15 +43,15 @@ abstract class Worker {
     final completer = Completer();
     final requestId = Capability();
     _completers[requestId] = completer;
-    _sendPort?.send(WorkRequest(requestId, message));
+    _p2?.send(WorkRequest(requestId, message));
     return completer.future;
   }
 
   Future<void> init() async {
-    final receivePort = ReceivePort();
-    receivePort.listen((message) {
+    final r1 = ReceivePort();
+    r1.listen((message) {
       if (message is SendPort) {
-        _sendPort = message;
+        _p2 = message;
         _isolateReady.complete();
         return;
       }
@@ -65,27 +65,27 @@ abstract class Worker {
     });
     _isolate = await Isolate.spawn(
       _isolateEntry,
-      receivePort.sendPort,
+      r1.sendPort,
     );
   }
 
   WorkResponse runThread(WorkRequest _request);
 
   void _isolateEntry(dynamic message1) {
-    SendPort? tmpSendPort;
+    SendPort? p1;
 
-    final tmpReceivePort = ReceivePort();
-    tmpReceivePort.listen((dynamic message2) async {
+    final r2 = ReceivePort();
+    r2.listen((dynamic message2) async {
       if (message2 is WorkRequest) {
         WorkResponse _response = await runThread(message2);
-        tmpSendPort?.send(_response);
+        p1?.send(_response);
         return;
       }
     });
 
     if (message1 is SendPort) {
-      tmpSendPort = message1;
-      tmpSendPort.send(tmpReceivePort.sendPort);
+      p1 = message1;
+      p1.send(r2.sendPort);
       return;
     }
   }
