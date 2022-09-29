@@ -1,110 +1,158 @@
-import 'dart:async';
-import 'dart:io';
 import 'dart:isolate';
 
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:isolate/isolate_runner.dart';
+import 'package:isolate/load_balancer.dart';
+
 main(List<String> args) async {
-  var worker = WorkerImp();
-  // for (int i = 0; i < 100; i++) {
-  //   worker.reuqest('发送消息$i').then((data) {
-  //     print('子线程处理后的消息:$data');
-  //   });
-  // }
-  worker.reuqest('发送消息1').then((data) {
-    print('子线程处理后的消息:$data');
-  });
+  runApp(const MyApp());
 }
 
-class WorkerImp extends Worker {
+dynamic _start() async {
+  var res = await LinkrIsolate.resolve(
+    IsolateMethods.entryPoint,
+    {"data": "data"},
+  );
+  debugPrint("res===>:$res");
+  return res;
+}
+
+class IsolateMethods {
+  static Future<String> entryPoint(Map<String, dynamic> data) async {
+    int num = 0;
+    for (int i = 0; i < 100000000; i++) {
+      num += i;
+    }
+    return "结束${Isolate.current.debugName}==>:$num";
+  }
+}
+
+class LinkrIsolate {
+  static int loadBalancerSize = 4;
+  static Future<LoadBalancer> loadBalancer =
+      LoadBalancer.create(loadBalancerSize, IsolateRunner.spawn);
+
+  static Future<dynamic> resolve(method, dynamic data) async {
+    final LoadBalancer lb = await loadBalancer;
+    var res = await lb.run<dynamic, dynamic>(method, data);
+    return res;
+  }
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({Key? key}) : super(key: key);
+
+  // This widget is the root of your application.
   @override
-  WorkResponse runThread(WorkRequest _request) {
-    print('子线程收到：${_request.message}');
-    print('运行耗时任务');
-    sleep(const Duration(seconds: 5));
-    return WorkResponse.ok(_request.requestId, '处理后的消息:${_request.message}');
-  }
-}
-
-abstract class Worker {
-  SendPort? _p2;
-  Isolate? _isolate;
-  final _isolateReady = Completer<void>();
-  final Map<Capability, Completer> _completers = {};
-
-  Worker() {
-    init();
-  }
-
-  void dispose() {
-    _isolate?.kill();
-  }
-
-  Future reuqest(dynamic message) async {
-    await _isolateReady.future;
-    final completer = Completer();
-    final requestId = Capability();
-    _completers[requestId] = completer;
-    _p2?.send(WorkRequest(requestId, message));
-    return completer.future;
-  }
-
-  Future<void> init() async {
-    final r1 = ReceivePort();
-    r1.listen((message) {
-      if (message is SendPort) {
-        _p2 = message;
-        _isolateReady.complete();
-        return;
-      }
-      if (message is WorkResponse) {
-        final completer = _completers[message.requestId];
-        if (completer != null && message.success) {
-          completer.complete(message.message);
-        }
-        return;
-      }
-    });
-    _isolate = await Isolate.spawn(
-      _isolateEntry,
-      r1.sendPort,
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Flutter Demo',
+      theme: ThemeData(
+        // This is the theme of your application.
+        //
+        // Try running your application with "flutter run". You'll see the
+        // application has a blue toolbar. Then, without quitting the app, try
+        // changing the primarySwatch below to Colors.green and then invoke
+        // "hot reload" (press "r" in the console where you ran "flutter run",
+        // or simply save your changes to "hot reload" in a Flutter IDE).
+        // Notice that the counter didn't reset back to zero; the application
+        // is not restarted.
+        primarySwatch: Colors.blue,
+      ),
+      home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
+}
 
-  WorkResponse runThread(WorkRequest _request);
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({Key? key, required this.title}) : super(key: key);
 
-  void _isolateEntry(dynamic message1) {
-    SendPort? p1;
+  // This widget is the home page of your application. It is stateful, meaning
+  // that it has a State object (defined below) that contains fields that affect
+  // how it looks.
 
-    final r2 = ReceivePort();
-    r2.listen((dynamic message2) async {
-      if (message2 is WorkRequest) {
-        WorkResponse _response = await runThread(message2);
-        p1?.send(_response);
-        return;
-      }
+  // This class is the configuration for the state. It holds the values (in this
+  // case the title) provided by the parent (in this case the App widget) and
+  // used by the build method of the State. Fields in a Widget subclass are
+  // always marked "final".
+
+  final String title;
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  int _counter = 0;
+
+  void _incrementCounter() {
+    setState(() {
+      // This call to setState tells the Flutter framework that something has
+      // changed in this State, which causes it to rerun the build method below
+      // so that the display can reflect the updated values. If we changed
+      // _counter without calling setState(), then the build method would not be
+      // called again, and so nothing would appear to happen.
+      _counter++;
     });
 
-    if (message1 is SendPort) {
-      p1 = message1;
-      p1.send(r2.sendPort);
-      return;
+    if (_counter % 10 == 9) {
+      for (int i = 0; i < 5; i++) {
+        debugPrint("开始任务:$i");
+        _start();
+      }
     }
   }
-}
 
-class WorkRequest {
-  final Capability requestId;
-
-  final dynamic message;
-
-  const WorkRequest(this.requestId, this.message);
-}
-
-class WorkResponse {
-  final Capability requestId;
-
-  final bool success;
-
-  final dynamic message;
-
-  const WorkResponse.ok(this.requestId, this.message, {this.success = true});
+  @override
+  Widget build(BuildContext context) {
+    // This method is rerun every time setState is called, for instance as done
+    // by the _incrementCounter method above.
+    //
+    // The Flutter framework has been optimized to make rerunning build methods
+    // fast, so that you can just rebuild anything that needs updating rather
+    // than having to individually change instances of widgets.
+    return Scaffold(
+      appBar: AppBar(
+        // Here we take the value from the MyHomePage object that was created by
+        // the App.build method, and use it to set our appbar title.
+        title: Text(widget.title),
+      ),
+      body: Center(
+        // Center is a layout widget. It takes a single child and positions it
+        // in the middle of the parent.
+        child: Column(
+          // Column is also a layout widget. It takes a list of children and
+          // arranges them vertically. By default, it sizes itself to fit its
+          // children horizontally, and tries to be as tall as its parent.
+          //
+          // Invoke "debug painting" (press "p" in the console, choose the
+          // "Toggle Debug Paint" action from the Flutter Inspector in Android
+          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
+          // to see the wireframe for each widget.
+          //
+          // Column has various properties to control how it sizes itself and
+          // how it positions its children. Here we use mainAxisAlignment to
+          // center the children vertically; the main axis here is the vertical
+          // axis because Columns are vertical (the cross axis would be
+          // horizontal).
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Text(
+              'You have pushed the button this many times:',
+            ),
+            Text(
+              '$_counter',
+              style: Theme.of(context).textTheme.headline4,
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _incrementCounter,
+        tooltip: 'Increment',
+        child: const Icon(Icons.add),
+      ), // This trailing comma makes auto-formatting nicer for build methods.
+    );
+  }
 }
